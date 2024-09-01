@@ -10,6 +10,7 @@ from audiobook_generator.config.general_config import GeneralConfig
 from audiobook_generator.core.audio_tags import AudioTags
 from audiobook_generator.core.utils import set_audio_tags
 from audiobook_generator.tts_providers.base_tts_provider import BaseTTSProvider
+from audiobook_generator.core.utils import split_text
 
 logger = logging.getLogger(__name__)
 
@@ -51,33 +52,44 @@ class PiperTTSProvider(BaseTTSProvider):
         output_file: str,
         audio_tags: AudioTags,
     ):
+        text_chunks = split_text(text, 1000, self.config.language)
 
+        chapter_audio = AudioSegment.empty()
         with tempfile.TemporaryDirectory() as tmpdirname:
-            logger.debug("created temporary directory %r", tmpdirname)
+            for i, chunk in enumerate(text_chunks, 1):
+                logger.debug("created temporary directory %r", tmpdirname)
 
-            tmpfilename = Path(tmpdirname) / "piper.wav"
+                logger.info(
+                    f"Processing chapter-{audio_tags.idx} <{audio_tags.title}>, chunk {i} of {len(text_chunks)}"
+                )
 
-            run(
-                [
-                    "piper-tts",
-                    "--model",
-                    self.config.model_name,
-                    "--speaker",
-                    self.config.voice_name,
-                    "--sentence_silence",
-                    str(self.config.break_duration),
-                    "--length_scale",
-                    str(1.0 / self.config.voice_rate),
-                    "-f",
-                    tmpfilename,
-                ],
-                input=text.encode("utf-8"),
-            )
+                tmpfilename = Path(tmpdirname) / f"piper{i}.wav"
 
-            # Convert the wav file to the desired format
-            AudioSegment.from_wav(tmpfilename).export(
-                output_file, format=self.config.output_format
-            )
+                run(
+                    [
+                        "./piper-tts-bin/piper",
+                        "--model",
+                        self.config.model_name,
+                        "--speaker",
+                        self.config.voice_name,
+                        # "--sentence_silence",
+                        # str(self.config.break_duration),
+                        # "--length_scale",
+                        # str(1.0 / self.config.voice_rate),
+                        "-f",
+                        tmpfilename,
+                    ],
+                    input=chunk.encode("utf-8"),
+                )
+
+                # Convert the wav file to the desired format
+                # AudioSegment.from_wav(tmpfilename).export(
+                #     output_file, format=self.config.output_format
+                # )
+
+                chapter_audio += AudioSegment.from_file(tmpfilename)
+
+            chapter_audio.export(output_file, format=self.config.output_format)
 
         set_audio_tags(output_file, audio_tags)
 
